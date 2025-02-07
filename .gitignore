@@ -17,3 +17,6 @@ build/
 
 *.tmp
 *.temp
+
+# Compiled JavaScript files
+src/**/*.js

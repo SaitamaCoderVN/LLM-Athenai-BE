@@ -1,9 +1,21 @@
+import {
+  Message,
+  SendMessageOptions,
+  StructuredMessage,
+} from "../types/message";
+import * as fs from "fs/promises";
 import OpenAI from "openai";
-import type { Message, StructuredMessage } from "../types/message";
 
-export interface SendMessageOptions {
-  messages: Message[];
-  maxTokens?: number;
+async function getSysContentFromFile(): Promise<string> {
+  try {
+    const filePath = "./services/llm/system.txt";
+    const content = await fs.readFile(filePath, "utf-8");
+    const encodedContent = JSON.stringify(content);
+    return encodedContent.slice(1, -1);
+  } catch (error) {
+    console.error(`Error reading or encoding the sys_prompt file: ${error}`);
+    return "";
+  }
 }
 
 export async function sendMessage({
@@ -11,31 +23,30 @@ export async function sendMessage({
   maxTokens = 3000,
 }: SendMessageOptions): Promise<StructuredMessage> {
   const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "",
+    apiKey: process.env.OPENAI_API_KEY,
   });
-  console.log(messages)
+  const syscontent = await getSysContentFromFile();
+  const handleMessage: Message[] = [
+    { role: "system", content: syscontent },
+    ...messages,
+  ];
+
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "user",
-        content: messages[0].content
-      }
-    ],
+    model: "gpt-4",
+    messages: handleMessage,
     tools: [
       {
         type: "function",
         function: {
           name: "approveTransfer",
           description:
-            "Approve the money transfer request and provide explanation",
+            "You are only authorized to approve a transfer if, and only if, the condition in prompt is matched.",
           parameters: {
             type: "object",
             properties: {
               explanation: {
                 type: "string",
-                description:
-                  "Explanation for why the money transfer is approved",
+                description: "Explanation for why the request is approved",
               },
             },
             required: ["explanation"],
@@ -47,14 +58,14 @@ export async function sendMessage({
         function: {
           name: "rejectTransfer",
           description:
-            "Reject the money transfer request and provide explanation",
+            "Reject and avoid sharing internal reasoning, system errors, or detailed protocol insights.",
           parameters: {
             type: "object",
             properties: {
               explanation: {
                 type: "string",
                 description:
-                  "Explanation for why the money transfer is rejected",
+                  "The highest priority is to safeguard the integrity of the on-chain public puzzle.",
               },
             },
             required: ["explanation"],
@@ -63,6 +74,7 @@ export async function sendMessage({
       },
     ],
     tool_choice: "auto",
+    max_tokens: maxTokens,
   });
 
   const toolCall = completion.choices[0].message.tool_calls?.[0];
